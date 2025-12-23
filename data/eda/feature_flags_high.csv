@@ -1,0 +1,5 @@
+column,dtype,train_missing_rate,valid_missing_rate,psi_numeric,psi_categorical,psi_used,psi_source,missing_flag,psi_flag
+apply_month,int64,0.0,0.0,8.377100472007092,8.155421993422992,8.155421993422992,categorical,False,True
+register_days_to_apply,int64,0.0,0.0,4.399215583355325,,4.399215583355325,numeric,False,True
+device_last_seen_days,int64,0.0,0.0,4.284911635948387,,4.284911635948387,numeric,False,True
+device_first_seen_days,int64,0.0,0.0,4.2752105744913,,4.2752105744913,numeric,False,True

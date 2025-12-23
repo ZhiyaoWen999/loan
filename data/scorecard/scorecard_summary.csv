@@ -1,0 +1,2 @@
+base_score,pdo,base_odds,base_points,intercept,train_auc,valid_auc,train_ks,valid_ks,iv_threshold,feature_count,stepwise,p_enter,p_remove
+600,50,20,658.2430705069771,-3.803152675735297,0.9821006564551422,0.8130870880433052,0.8817286652078774,0.5381308708804331,0.02,20,True,0.05,0.1
