@@ -1,4 +1,15 @@
 #!/usr/bin/env python3
+"""Basic EDA report for train/valid feature tables.
+
+This script is intentionally lightweight and produces CSV summaries instead of
+notebooks:
+- missingness summary
+- numeric summary + PSI
+- categorical top values + PSI
+- label summary (bad rate)
+- feature flags for high missingness / high PSI
+"""
+
 import argparse
 from pathlib import Path
 
@@ -16,16 +27,19 @@ from common import (
 
 
 def infer_categorical(nunique_train: int, nunique_valid: int, max_unique: int) -> bool:
+    """Heuristic: treat low-cardinality numeric columns as categorical."""
     return (nunique_train <= max_unique) and (nunique_valid <= max_unique)
 
 
 def psi_from_counts(p: pd.Series, q: pd.Series, eps: float = 1e-6) -> float:
+    """Compute PSI given two distributions p and q (already normalized)."""
     p = p.astype(float).replace(0, eps)
     q = q.astype(float).replace(0, eps)
     return float(((p - q) * np.log(p / q)).sum())
 
 
 def psi_numeric(train: pd.Series, valid: pd.Series, bins: int = 10) -> float:
+    """PSI for numeric columns using train-quantile cut points."""
     t = pd.to_numeric(train, errors="coerce").dropna()
     v = pd.to_numeric(valid, errors="coerce").dropna()
     if t.empty or v.empty:
@@ -47,6 +61,7 @@ def psi_numeric(train: pd.Series, valid: pd.Series, bins: int = 10) -> float:
 
 
 def psi_categorical(train: pd.Series, valid: pd.Series) -> float:
+    """PSI for categorical columns using category frequencies."""
     t = train.astype("string").fillna("MISSING")
     v = valid.astype("string").fillna("MISSING")
     p = t.value_counts(normalize=True)
@@ -58,6 +73,7 @@ def psi_categorical(train: pd.Series, valid: pd.Series) -> float:
 
 
 def summary_numeric(series: pd.Series) -> dict:
+    """Compute basic numeric distribution stats (mean/std/quantiles)."""
     s = pd.to_numeric(series, errors="coerce")
     return {
         "mean": float(s.mean()),
@@ -73,6 +89,7 @@ def summary_numeric(series: pd.Series) -> dict:
 
 
 def main() -> None:
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Basic EDA report for train/valid feature tables.")
     parser.add_argument("--train", type=str, default="data/features_train_90d.csv", help="Train CSV")
     parser.add_argument("--valid", type=str, default="data/features_valid_90d.csv", help="Valid CSV")

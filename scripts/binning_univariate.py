@@ -1,4 +1,15 @@
 #!/usr/bin/env python3
+"""Univariate binning and bad-rate tables for quick inspection.
+
+This is a simple, model-agnostic view of each feature:
+- numeric features are quantile-binned (`--bins`)
+- categorical features keep top-N categories (`--top-n`) and collapse to OTHER
+
+Outputs:
+- one CSV per feature: `binning_<feature>.csv` (bin stats + bad rate)
+- `binning_summary.csv` (bin count, bad-rate range, monotonic flag)
+"""
+
 import argparse
 from pathlib import Path
 
@@ -17,10 +28,12 @@ from common import (
 
 
 def is_numeric(series: pd.Series) -> bool:
+    """Helper to decide whether a Series should be treated as numeric."""
     return pd.api.types.is_numeric_dtype(series)
 
 
 def bin_numeric(series: pd.Series, bins: int) -> tuple[pd.Series, str, bool]:
+    """Bin a numeric Series into quantiles; return (binned, bin_type, ordered_flag)."""
     s = pd.to_numeric(series, errors="coerce")
     if s.nunique(dropna=True) <= bins:
         binned = s.astype("string").fillna("MISSING")
@@ -34,12 +47,14 @@ def bin_numeric(series: pd.Series, bins: int) -> tuple[pd.Series, str, bool]:
 
 
 def bin_categorical(series: pd.Series, top_n: int) -> tuple[pd.Series, str, bool]:
+    """Bin a categorical Series by keeping top-N and mapping the rest to OTHER."""
     s = series.astype("string").fillna("MISSING")
     top = s.value_counts().head(top_n).index
     return s.where(s.isin(top), "OTHER"), "categorical", False
 
 
 def bad_rate_table(df: pd.DataFrame, feature: str, label: str, ordered: bool) -> pd.DataFrame:
+    """Compute bad-rate aggregation for a binned feature."""
     work = df[[feature, label]].copy()
     work["bad"] = pd.to_numeric(work[label], errors="coerce")
     work = work.dropna(subset=["bad"])
@@ -57,6 +72,7 @@ def bad_rate_table(df: pd.DataFrame, feature: str, label: str, ordered: bool) ->
 
 
 def main() -> None:
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Univariate binning and bad-rate tables.")
     parser.add_argument("--train", type=str, default="data/features_train_90d.csv", help="Train CSV")
     parser.add_argument("--label", type=str, default="y_dpd30_ever", help="Label column")

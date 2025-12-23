@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""Plot vintage charts from `vintage_mob.py` outputs (seaborn/matplotlib).
+
+Supports:
+- line charts (metric over MOB) with hue as cohort or segment
+- heatmaps (cohort×MOB or segment×MOB)
+
+This script is intentionally "headless" (Agg backend) and writes PNG files.
+"""
+
 import argparse
 import importlib.util
 import os
@@ -19,6 +28,7 @@ from common import (
 
 
 def ensure_seaborn(mpl_config_dir: Path) -> None:
+    """Ensure plotting dependencies exist and set MPLCONFIGDIR to a writable directory."""
     missing = [pkg for pkg in ["matplotlib", "seaborn"] if importlib.util.find_spec(pkg) is None]
     if missing:
         raise SystemExit(
@@ -32,7 +42,7 @@ def ensure_seaborn(mpl_config_dir: Path) -> None:
 
 
 def sorted_cohorts(values: pd.Series) -> list[str]:
-    # Works for YYYY-MM (monthly) and YYYY-MM-DD/weekly strings alike by parsing to Period when possible.
+    """Sort cohort strings in a time-aware way when possible (e.g. YYYY-MM)."""
     v = values.dropna().astype(str).unique().tolist()
     try:
         p = pd.PeriodIndex(v, freq="M")
@@ -42,6 +52,7 @@ def sorted_cohorts(values: pd.Series) -> list[str]:
 
 
 def main() -> None:
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Plot classic vintage charts using seaborn.")
     parser.add_argument("--infile", type=str, default="data/vintage_mob_dpd30.csv", help="Input vintage table")
     parser.add_argument("--outdir", type=str, default="data/figures", help="Output directory")

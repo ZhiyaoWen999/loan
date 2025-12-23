@@ -1,4 +1,20 @@
 #!/usr/bin/env python3
+"""Build the application-level modeling table (pre-loan features + post-loan label).
+
+This script joins the mock source tables into one wide table at application grain:
+- application info + behavioral aggregates (app_id)
+- user profile + bureau + device aggregates (user_id)
+- loan info + outcomes (approved apps only)
+
+Label (default):
+- `y_dpd30_ever`: whether DPD30+ ever happened within an observation window (90D),
+  and only defined for "mature" loans (loan_age_days >= maturity window).
+
+Outputs:
+- `model_dataset.csv`: all applications (including rejected/unlabeled)
+- `model_train_90d.csv`: mature, labeled loans used for training/validation
+"""
+
 import argparse
 from pathlib import Path
 
@@ -16,6 +32,7 @@ from common import (
 
 
 def assert_unique(df: pd.DataFrame, keys: list[str], name: str) -> None:
+    """Fail fast if the given key(s) are not unique in a table."""
     duplicated = df.duplicated(keys, keep=False)
     if duplicated.any():
         sample = df.loc[duplicated, keys].head(10)
@@ -23,10 +40,12 @@ def assert_unique(df: pd.DataFrame, keys: list[str], name: str) -> None:
 
 
 def read_table(datadir: Path, filename: str, datetime_cols: list[str] | None = None) -> pd.DataFrame:
+    """Read a CSV from datadir and parse selected datetime columns if present."""
     return read_csv_table(datadir / filename, datetime_cols=datetime_cols)
 
 
 def build_device_agg(devices: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate device-level records to user-level features."""
     devices = devices.copy()
     devices["is_android"] = (devices["os"] == "android").astype("int64")
 
@@ -62,6 +81,7 @@ def build_device_agg(devices: pd.DataFrame) -> pd.DataFrame:
 
 
 def main() -> None:
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Build an application-level modeling table for pre-loan risk.")
     parser.add_argument("--datadir", type=str, default="data", help="Directory containing source CSVs")
     parser.add_argument("--out", type=str, default=None, help="Output CSV path for all applications")
@@ -110,6 +130,7 @@ def main() -> None:
 
     device_agg = build_device_agg(devices)
 
+    # Join app-level sources first (app_id grain), then user-level enrichments.
     df = applications.merge(
         behavior.drop(columns=["apply_dt"]),
         on=["app_id", "user_id"],
@@ -119,6 +140,7 @@ def main() -> None:
     df = df.merge(bureau, on="user_id", how="left")
     df = df.merge(device_agg, on="user_id", how="left")
 
+    # Bring in loan and outcome only for approved applications that disbursed.
     loan_cols = ["loan_id", "app_id", "disburse_dt", "principal", "term_days", "apr", "first_due_dt"]
     df = df.merge(loans[loan_cols], on="app_id", how="left")
 
@@ -138,6 +160,7 @@ def main() -> None:
     outcome_cols = [c for c in desired_outcome_cols if c in outcomes.columns]
     df = df.merge(outcomes[outcome_cols], on="loan_id", how="left")
 
+    # Maturity filter: we can only compute "ever in X days" once the window is fully observed.
     as_of_date = pd.to_datetime(args.asof).normalize() if args.asof else pd.Timestamp.today().normalize()
     df["loan_age_days"] = (as_of_date - df["disburse_dt"]).dt.days
     df["label_available"] = df["loan_id"].notna() & (df["loan_age_days"] >= args.maturity_days)

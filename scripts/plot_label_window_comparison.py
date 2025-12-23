@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""Plot label-window comparison results as simple line charts.
+
+Inputs are produced by `compare_label_windows.py`:
+- overall bad rate by window
+- bad rate by risk_score decile by window
+
+Outputs are PNG files (Agg backend) saved under `data/figures/` or a run dir.
+"""
+
 import argparse
 import importlib.util
 import os
@@ -18,6 +27,7 @@ from common import (
 
 
 def ensure_matplotlib(mpl_config_dir: Path) -> None:
+    """Ensure matplotlib exists and direct its cache/config to a writable directory."""
     missing = [pkg for pkg in ["matplotlib"] if importlib.util.find_spec(pkg) is None]
     if missing:
         raise SystemExit(
@@ -29,6 +39,7 @@ def ensure_matplotlib(mpl_config_dir: Path) -> None:
 
 
 def plot_overall(df: pd.DataFrame, outpath: Path) -> None:
+    """Plot overall bad rate vs. observation window (30/60/90/180 days)."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -52,6 +63,7 @@ def plot_overall(df: pd.DataFrame, outpath: Path) -> None:
 
 
 def plot_by_decile(df: pd.DataFrame, outpath: Path) -> None:
+    """Plot bad rate vs. observation window for each risk_score decile."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -78,6 +90,7 @@ def plot_by_decile(df: pd.DataFrame, outpath: Path) -> None:
 
 
 def main() -> None:
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Plot bad-rate comparison across observation windows.")
     parser.add_argument(
         "--overall",

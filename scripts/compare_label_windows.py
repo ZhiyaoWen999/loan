@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+"""Compare bad-rate growth across different observation windows.
+
+When defining a "bad" label (e.g. DPD30+), you typically choose an observation
+window such as 30/60/90/180 days after disbursement. This script computes the
+bad rates across multiple windows to help you see:
+- how quickly bad rate matures (growth slows down)
+- whether rank-order by score decile is stable across windows
+
+Outputs (CSV):
+- overall bad rate by window
+- bad rate by cohort (month/week) and by score decile
+"""
+
 import argparse
 from pathlib import Path
 
@@ -27,6 +40,7 @@ LABEL_RENAME = {
 
 
 def main() -> None:
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Compare bad-rate growth across label windows (30/60/90/180D).")
     parser.add_argument(
         "--infile",
@@ -68,8 +82,10 @@ def main() -> None:
         raise SystemExit(f"Missing label columns: {missing}. Rebuild model table after regenerating data.")
 
     df = df[df[args.cohort_col].notna()].copy()
+    # cohort groups loans by disbursement period; useful for vintage-style stability checks.
     df["cohort"] = df[args.cohort_col].dt.to_period(args.freq).astype(str)
 
+    # Score deciles are used to check monotonicity / rank-order across label windows.
     df = add_risk_score_decile(df, args.score_col, args.score_bins)
 
     outdir = resolve_outdir(args.outdir, run_dir, name="label_windows")

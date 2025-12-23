@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+"""WOE scorecard pipeline (binning → WOE → logistic regression → points).
+
+This script implements a simplified, scorecard-style workflow:
+1) For each feature, build a coarse binning on the train set
+2) Compute WOE and IV; keep features above `--iv-threshold`
+3) Transform both train/valid into WOE values
+4) Fit logistic regression on WOE features (optionally stepwise selection)
+5) Convert coefficients into scorecard points using `--pdo`, `--base-score`, `--base-odds`
+
+Outputs (CSV) under `data/scorecard/` (or a run dir):
+- scorecard_woe_bins.csv, scorecard_iv.csv, scorecard_points.csv
+- scored train/valid with `score`, decile tables, summary, selected features
+"""
+
 import argparse
 from math import log
 from pathlib import Path
@@ -18,6 +32,7 @@ from common import (
 
 
 def auc_from_scores(y: pd.Series, score: pd.Series) -> float:
+    """Rank-based AUC (Mann-Whitney). Accepts either raw scores or predicted probabilities."""
     y = pd.to_numeric(y, errors="coerce")
     score = pd.to_numeric(score, errors="coerce")
     mask = y.notna() & score.notna()
@@ -35,6 +50,7 @@ def auc_from_scores(y: pd.Series, score: pd.Series) -> float:
 
 
 def ks_stat(y: pd.Series, score: pd.Series) -> float:
+    """Compute KS statistic from predicted scores (max CDF separation)."""
     y = pd.to_numeric(y, errors="coerce")
     score = pd.to_numeric(score, errors="coerce")
     mask = y.notna() & score.notna()
@@ -49,6 +65,7 @@ def ks_stat(y: pd.Series, score: pd.Series) -> float:
 
 
 def bin_series(series: pd.Series, bins: int, top_n: int) -> tuple[pd.Series, dict]:
+    """Create train-time binning for a single feature and return (binned, params)."""
     s = series.copy()
     if pd.api.types.is_numeric_dtype(s):
         s = pd.to_numeric(s, errors="coerce")
@@ -74,6 +91,7 @@ def bin_series(series: pd.Series, bins: int, top_n: int) -> tuple[pd.Series, dic
 
 
 def apply_binning(series: pd.Series, params: dict) -> pd.Series:
+    """Apply a stored binning spec (from train) to a new Series."""
     if params["type"] == "numeric_binned":
         s = pd.to_numeric(series, errors="coerce")
         edges = np.array(params["edges"], dtype=float)
@@ -90,6 +108,7 @@ def apply_binning(series: pd.Series, params: dict) -> pd.Series:
 
 
 def woe_table(binned: pd.Series, y: pd.Series, eps: float = 0.5) -> pd.DataFrame:
+    """Compute WOE table for a binned feature and binary label."""
     df = pd.DataFrame({"bin": binned.astype("string"), "y": y})
     df = df[df["y"].notna()].copy()
     agg = df.groupby("bin", observed=True)["y"].agg(["count", "sum"])
@@ -121,6 +140,7 @@ def make_scorecard(
     max_iter: int,
     outdir: Path,
 ) -> None:
+    """Train a scorecard and write scorecard + scoring artifacts to `outdir`."""
     y_train = train[label]
     y_valid = valid[label]
     features = [c for c in train.columns if c != label]
@@ -155,6 +175,7 @@ def make_scorecard(
     iv_df = pd.DataFrame(iv_rows).sort_values("iv", ascending=False)
 
     def transform(df: pd.DataFrame) -> pd.DataFrame:
+        """Map raw features into WOE values using train-derived binning + WOE maps."""
         out = {}
         for feature, params in binning_params.items():
             binned = apply_binning(df[feature], params)
@@ -177,7 +198,7 @@ def make_scorecard(
             iteration += 1
             changed = False
 
-            # Forward step
+            # Forward step: add one feature with the lowest p-value under threshold.
             pvals = {}
             for col in remaining:
                 try:
@@ -195,7 +216,7 @@ def make_scorecard(
                     remaining.remove(best_col)
                     changed = True
 
-            # Backward step
+            # Backward step: remove the worst p-value feature if it exceeds threshold.
             if selected:
                 try:
                     X = sm.add_constant(X_train[selected], has_constant="add")
@@ -259,6 +280,7 @@ def make_scorecard(
     scorecard_df = pd.DataFrame(scorecard_rows)
 
     def decile_table(y: pd.Series, score: pd.Series) -> pd.DataFrame:
+        """Aggregate score distribution into deciles with bad rates."""
         df = pd.DataFrame({"y": y, "score": score}).dropna()
         df["decile"] = pd.qcut(df["score"], 10, labels=False, duplicates="drop") + 1
         agg = df.groupby("decile", as_index=False).agg(
@@ -308,6 +330,7 @@ def make_scorecard(
 
 
 def main() -> None:
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Scorecard pipeline (WOE + logistic regression).")
     parser.add_argument("--train", type=str, default="data/features_train_90d.csv", help="Train CSV")
     parser.add_argument("--valid", type=str, default="data/features_valid_90d.csv", help="Valid CSV")

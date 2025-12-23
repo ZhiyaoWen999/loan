@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+"""Point-in-time (PIT) vintage summary using a fixed observation window.
+
+This script answers: "For each disbursement cohort (e.g., month), what is the
+90D bad rate?" where bad is defined by a label column (default `y_dpd30_ever`).
+
+It is useful to:
+- validate label maturity / stability across cohorts
+- compare segments (channel/product/score decile) at a fixed window
+
+Output is a cohort table (optionally segmented) with loan_cnt/bad_cnt/bad_rate.
+"""
+
 import argparse
 from pathlib import Path
 
@@ -26,6 +38,7 @@ def cohort_table(
     amount_col: str | None = "principal",
     score_col: str | None = "risk_score",
 ) -> pd.DataFrame:
+    """Aggregate label outcomes by cohort (and optional segment columns)."""
     work = df.copy()
     work = work[work[y_col].notna()].copy()
     work["bad"] = work[y_col].astype("int64")
@@ -48,6 +61,7 @@ def cohort_table(
 
 
 def main() -> None:
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Vintage (90D point-in-time) analysis on labeled loans.")
     parser.add_argument(
         "--infile",
@@ -104,9 +118,11 @@ def main() -> None:
     if df[args.cohort_col].isna().any():
         raise ValueError(f"{args.cohort_col} contains NaT; cannot build cohorts reliably.")
 
+    # Convert timestamps to cohort buckets (month/week/day).
     cohort_period = df[args.cohort_col].dt.to_period(args.freq)
     df["cohort"] = cohort_period.astype(str)
 
+    # Optional segmentation (e.g., by channel/product/score decile).
     by_cols = [c.strip() for c in args.by.split(",") if c.strip()]
     if "risk_score_decile" in by_cols:
         df = add_risk_score_decile(df, args.score_col, args.score_bins)

@@ -1,4 +1,19 @@
 #!/usr/bin/env python3
+"""Build model-ready feature tables (train/valid) for the 90D label setup.
+
+Inputs:
+- `model_train_90d.csv` (mature, labeled loans) produced by `build_model_table.py`
+
+Key steps:
+- parse datetimes and derive time features (hour/day-of-week/month, lags)
+- drop label/leakage columns and optionally auto-screened features
+- split train/valid by time (default: split quantile on disburse_dt)
+
+Outputs:
+- `features_train_90d.csv`, `features_valid_90d.csv`
+- `feature_columns_90d.txt` (feature list used for modeling)
+"""
+
 import argparse
 from pathlib import Path
 
@@ -30,6 +45,7 @@ DATE_COLS = [
 
 
 def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Derive simple calendar/recency features from datetime columns."""
     df = df.copy()
     if "apply_dt" in df.columns:
         df["apply_hour"] = df["apply_dt"].dt.hour
@@ -48,6 +64,7 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def main() -> None:
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Build 90D feature tables with time split.")
     parser.add_argument(
         "--infile",
@@ -115,6 +132,7 @@ def main() -> None:
 
     df = add_time_features(df)
 
+    # Drop columns that are labels, IDs, or leakage (post-loan) fields.
     drop_cols = {
         args.label,
         "loan_id",
@@ -190,6 +208,7 @@ def main() -> None:
 
     feature_cols = [c for c in df.columns if c not in drop_cols]
 
+    # Time split: train uses earlier disburse dates; valid uses later dates.
     if args.split_date:
         split_date = pd.to_datetime(args.split_date).normalize()
     else:

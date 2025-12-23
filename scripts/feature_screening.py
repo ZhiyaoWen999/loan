@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+"""Automatic feature screening (cheap filters before modeling).
+
+This script computes per-feature signals to help you prune the feature space:
+- IV (information value) after coarse binning
+- univariate AUC (numeric features directly; categorical via category bad-rate)
+- low variance / nearly-constant checks
+- high correlation pairs (numeric-only) with a suggested drop candidate
+
+Outputs (CSV):
+- iv_auc_summary.csv
+- corr_pairs.csv
+- feature_screening_flags.csv
+"""
+
 import argparse
 from pathlib import Path
 
@@ -17,6 +31,7 @@ from common import (
 
 
 def auc_from_scores(y: pd.Series, score: pd.Series) -> float:
+    """Rank-based AUC (Mann-Whitney) that tolerates missing values."""
     y = pd.to_numeric(y, errors="coerce")
     score = pd.to_numeric(score, errors="coerce")
     mask = y.notna() & score.notna()
@@ -34,6 +49,11 @@ def auc_from_scores(y: pd.Series, score: pd.Series) -> float:
 
 
 def bin_series(series: pd.Series, bins: int, top_n: int) -> tuple[pd.Series, str]:
+    """Coarse binning used for IV computation.
+
+    - Numeric: quantile bins (qcut), fallback to cut() or categorical if unique small
+    - Categorical: keep top-N and collapse the rest into OTHER
+    """
     s = series.copy()
     if pd.api.types.is_numeric_dtype(s):
         s = pd.to_numeric(s, errors="coerce")
@@ -48,6 +68,7 @@ def bin_series(series: pd.Series, bins: int, top_n: int) -> tuple[pd.Series, str
         binned = binned.cat.add_categories(["MISSING"]).fillna("MISSING")
         return binned.astype(str), "numeric_binned"
 
+    # Categorical: keep top-N, collapse others.
     s = s.astype("string").fillna("MISSING")
     top = s.value_counts().head(top_n).index
     binned = s.where(s.isin(top), "OTHER")
@@ -55,6 +76,7 @@ def bin_series(series: pd.Series, bins: int, top_n: int) -> tuple[pd.Series, str
 
 
 def calc_iv(binned: pd.Series, y: pd.Series, eps: float = 0.5) -> float:
+    """Classic IV with Laplace smoothing to avoid div-by-zero."""
     df = pd.DataFrame({"bin": binned, "y": y})
     df = df[df["y"].notna()].copy()
     df["bin"] = df["bin"].astype("string").fillna("MISSING")
@@ -70,6 +92,7 @@ def calc_iv(binned: pd.Series, y: pd.Series, eps: float = 0.5) -> float:
 
 
 def main() -> None:
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Feature screening: IV, univariate AUC, low variance, correlation.")
     parser.add_argument("--train", type=str, default="data/features_train_90d.csv", help="Train CSV")
     parser.add_argument("--label", type=str, default="y_dpd30_ever", help="Label column")
@@ -172,6 +195,7 @@ def main() -> None:
                 s2 = summary.loc[summary["feature"] == c2, "auc_adj"]
                 score1 = float(s1.iloc[0]) if len(s1) else float("nan")
                 score2 = float(s2.iloc[0]) if len(s2) else float("nan")
+                # Prefer keeping the feature with higher univariate AUC.
                 if np.isnan(score1) or np.isnan(score2):
                     drop = c2 if abs(val) >= abs(val) else c1
                 else:

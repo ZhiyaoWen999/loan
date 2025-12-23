@@ -1,4 +1,19 @@
 #!/usr/bin/env python3
+"""Generate mock pre-loan risk tables for a sandbox workflow.
+
+The goal is not perfect realism, but a coherent set of relational tables that can
+support:
+- pre-loan feature building (applications + user/bureau/device/behavior joins)
+- label definition using post-loan outcomes (DPD30 within 30/60/90/180 days)
+- vintage & MOB analysis using DPD snapshots
+
+Outputs (CSV):
+- users.csv, bureau.csv, devices.csv
+- applications.csv, behavior_agg.csv
+- loans.csv, loan_outcomes.csv
+- loan_dpd_snapshots.csv (for cohort×MOB vintage)
+"""
+
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -18,20 +33,24 @@ from common import (
 
 
 def sigmoid(x):
+    """Logistic transform used to map a score/logit into [0,1] probabilities."""
     return 1 / (1 + np.exp(-x))
 
 
 def clamp(series, low, high):
+    """Clamp numeric arrays/Series into [low, high]."""
     return np.minimum(np.maximum(series, low), high)
 
 
 def random_dates(start, end, n, rng):
+    """Sample `n` random timestamps uniformly from [start, end)."""
     start_u = start.value // 10**9
     end_u = end.value // 10**9
     return pd.to_datetime(rng.integers(start_u, end_u, n), unit="s")
 
 
 def main():
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Generate mock pre-loan risk data tables.")
     parser.add_argument("--users", type=int, default=5000, help="Number of users")
     parser.add_argument("--apps", type=int, default=8000, help="Number of applications")
@@ -54,6 +73,9 @@ def main():
     today = pd.Timestamp(datetime.now().date())
     start_date = today - pd.Timedelta(days=730)
 
+    # -----------------------
+    # users.csv (static user profile)
+    # -----------------------
     user_id = np.arange(1, args.users + 1)
     register_dt = random_dates(start_date, today, args.users, rng)
     age = rng.integers(18, 56, args.users)
@@ -95,6 +117,9 @@ def main():
         }
     )
 
+    # -----------------------
+    # bureau.csv (credit bureau snapshot)
+    # -----------------------
     bureau_score = clamp(rng.normal(600, 80, args.users), 300, 850).round(0)
     delinq_12m = rng.choice([0, 1, 2, 3, 4, 5], args.users, p=[0.7, 0.15, 0.08, 0.04, 0.02, 0.01])
     credit_utilization = clamp(rng.beta(2, 4, args.users), 0, 1).round(2)
@@ -112,6 +137,9 @@ def main():
         }
     )
 
+    # -----------------------
+    # devices.csv (device-level signals; later aggregated to user-level features)
+    # -----------------------
     device_rows = []
     device_id = 1
     for uid, reg_dt, dcnt in zip(user_id, register_dt, device_count):
@@ -145,6 +173,9 @@ def main():
 
     devices = pd.DataFrame(device_rows)
 
+    # -----------------------
+    # applications.csv (one row per application)
+    # -----------------------
     app_user_id = rng.choice(user_id, size=args.apps, replace=True)
     apply_dt = random_dates(start_date + pd.Timedelta(days=30), today, args.apps, rng)
     channel = rng.choice(["app", "web", "partner"], size=args.apps, p=[0.7, 0.2, 0.1])
@@ -165,6 +196,9 @@ def main():
         }
     )
 
+    # -----------------------
+    # behavior_agg.csv (application-level behavioral aggregates)
+    # -----------------------
     behavior_rows = []
     for app_id, uid, adt in applications[["app_id", "user_id", "apply_dt"]].itertuples(index=False):
         login_7d = int(clamp(rng.normal(5, 3), 0, 20))
@@ -189,6 +223,7 @@ def main():
 
     behavior = pd.DataFrame(behavior_rows)
 
+    # Create a "current" device snapshot per user to build a plausible risk score.
     device_main = (
         devices.sort_values(["user_id", "first_seen_dt"])
         .groupby("user_id")
@@ -211,6 +246,9 @@ def main():
         .merge(behavior.drop(columns=["apply_dt"]), on=["app_id", "user_id"], how="left")
     )
 
+    # -----------------------
+    # risk_score + decision (mock approval)
+    # -----------------------
     risk_score = (
         650
         + (app_features["monthly_income"] - 5000) / 100
@@ -243,6 +281,9 @@ def main():
         approved_term=approved_term.astype(int),
     )
 
+    # -----------------------
+    # loans.csv (only for approved apps)
+    # -----------------------
     approved_apps = applications[applications["decision"] == "approved"].copy()
     loan_id = np.arange(1, len(approved_apps) + 1)
     disburse_dt = approved_apps["approve_dt"] + pd.to_timedelta(rng.integers(0, 2, len(approved_apps)), unit="D")
@@ -262,6 +303,11 @@ def main():
         }
     )
 
+    # -----------------------
+    # loan_outcomes.csv (post-loan outcomes)
+    # - dpd_max_30/60/90/180d
+    # - dpd30_ever_* (window labels)
+    # -----------------------
     loan_features = approved_apps.merge(
         app_features, on=["app_id", "user_id"], how="left", suffixes=("", "_feat")
     )
@@ -359,6 +405,9 @@ def main():
         }
     )
 
+    # -----------------------
+    # loan_dpd_snapshots.csv (MOB snapshots for vintage curves)
+    # -----------------------
     offsets = pd.DataFrame({"days_since_disburse": [0, 30, 60, 90, 120, 150, 180]})
     dpd_params = pd.DataFrame(
         {
@@ -402,6 +451,9 @@ def main():
         & (snapshots["chargeoff_dt"].fillna(pd.Timestamp.max) >= snapshots["snapshot_dt"])
     ).astype(int)
 
+    # -----------------------
+    # Write outputs
+    # -----------------------
     users_path = outdir / "users.csv"
     bureau_path = outdir / "bureau.csv"
     devices_path = outdir / "devices.csv"
