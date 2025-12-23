@@ -2,6 +2,8 @@
 
 本仓库用于模拟贷前（审批前）风控流程：生成模拟数据、定义标签、做 vintage 校验、构建特征、EDA/筛选/分箱、训练 WOE 评分卡。
 
+**English TL;DR**: Pre-loan risk sandbox in pandas: mock data → label (DPD30@90D) → vintage (PIT & MOB) → label window compare → feature build → EDA/screen/bin → WOE scorecard + plots.
+
 ## 覆盖内容
 - 模拟表：users、applications、bureau、devices、behavior_agg、loans、loan_outcomes、loan_dpd_snapshots。
 - 标签定义：`y_dpd30_ever`（放款后 90 天内是否出现 DPD30+），并做成熟期过滤。
@@ -89,6 +91,20 @@ python scripts/scorecard_business_view.py --out data/scorecard/scorecard_busines
 - `data/features_train_90d.csv`, `data/features_valid_90d.csv`：特征表。
 - `data/scorecard/scorecard_points.csv`：评分卡分数与系数。
 - `data/scorecard/scorecard_business_view.csv`：业务视角的 WOE/分数表。
+
+**Key outputs (EN quick ref)**  
+- Modeling tables: `model_dataset.csv`, `model_train_90d.csv`  
+- Vintage: `vintage_90d_m*.csv`, `vintage_mob_dpd30*.csv`  
+- Label windows: `label_window_bad_rates_*.csv`, plots in `data/figures/`  
+- Features: `features_train_90d.csv`, `features_valid_90d.csv`, `feature_columns_90d.txt`  
+- Scorecard: `scorecard_points.csv`, `scorecard_summary.csv`, deciles, `scorecard_business_view.csv`
+
+## 常用参数（通用）
+- `--run-dir`: 批次输出目录，`auto` 时自动创建 `data/run_YYYYMMDD_HHMMSS` 并写 manifest。
+- `--log-level`: 日志等级（DEBUG/INFO/…）。
+- `--bins`, `--top-n`: 分箱数量与保留前 N 类别（用于 binning/WOE/IV）。
+- `--iv-threshold`, `--auc-threshold`, `--corr-threshold`: 特征筛选阈值。
+- 评分卡：`--pdo` / `--base-score` / `--base-odds` 控制评分刻度，`--stepwise`/`--p-enter`/`--p-remove` 控制逐步回归。
 
 ## 备注
 - 各脚本默认使用 `data/` 路径，可用参数覆盖。
